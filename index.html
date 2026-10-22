@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="id" class="lenis">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repo File Manager</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          line: '#1c2230',
+          panel: '#0d0f14',
+          accent: '#2563eb',
+        },
+        fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] }
+      }
+    }
+  };
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://unpkg.com/lenis@1.1.18/dist/lenis.min.js"></script>
+
+<style>
+  html.lenis, html.lenis body { height: auto; }
+  .lenis.lenis-smooth { scroll-behavior: auto !important; }
+  .lenis.lenis-stopped { overflow: hidden; }
+
+  body {
+    background:
+      radial-gradient(circle at 15% -10%, rgba(37,99,235,.22), transparent 45%),
+      radial-gradient(circle at 90% 110%, rgba(37,99,235,.12), transparent 40%),
+      #050505;
+    color: #e5e7eb;
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  .glass { background: rgba(13,15,20,.82); backdrop-filter: blur(10px); border: 1px solid #1c2230; }
+  .border-line { border-color: #1c2230; }
+  .row { transition: background .15s; }
+  .row:hover { background: rgba(37,99,235,.07); }
+  .row.sel { background: rgba(37,99,235,.18); }
+  .crumb { padding: .25rem .5rem; border-radius: .4rem; color: #9ca3af; }
+  .crumb:hover { color: #fff; background: #111827; }
+
+  .input {
+    width: 100%; background: #0a0c10; border: 1px solid #1c2230; border-radius: .6rem;
+    padding: .6rem .8rem; color: #e5e7eb; outline: none; transition: .2s;
+  }
+  .input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.25); }
+  .btn { display: inline-flex; align-items: center; gap: .5rem; padding: .55rem 1rem; border-radius: .6rem; font-weight: 500; font-size: .9rem; transition: .2s; white-space: nowrap; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-ghost { background: #0a0c10; border: 1px solid #1c2230; color: #cbd5e1; }
+  .btn-ghost:hover { border-color: #2563eb; color: #fff; }
+  .btn-danger { background: #7f1d1d; color: #fff; }
+  .btn-danger:hover { background: #991b1b; }
+  .btn-ic { width: 2.1rem; height: 2.1rem; display: grid; place-items: center; border-radius: .5rem; color: #9ca3af; transition: .15s; }
+  .btn-ic:hover { background: #1c2230; color: #fff; }
+
+  .fade { animation: fade .18s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  #drop { border: 2px dashed #2563eb; background: rgba(37,99,235,.08); }
+</style>
+</head>
+<body class="antialiased">
+
+<!-- LOGIN -->
+<section id="login" class="min-h-screen flex items-center justify-center p-6">
+  <div class="glass rounded-2xl w-full max-w-md p-8 shadow-2xl fade">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-11 h-11 rounded-xl bg-blue-600 grid place-items-center text-white text-xl"><i class="fa-solid fa-folder-tree"></i></div>
+      <div>
+        <h1 class="text-xl font-bold text-white">Repo File Manager</h1>
+        <p class="text-sm text-gray-500">Kelola file repo GitHub privat dari browser</p>
+      </div>
+    </div>
+
+    <form id="loginForm" class="space-y-4">
+      <div>
+        <label class="text-sm text-gray-400">Personal Access Token</label>
+        <input id="tk" type="password" class="input mt-1" placeholder="github_pat_..." autocomplete="off">
+        <p class="text-xs text-gray-500 mt-1">Pakai fine-grained token dengan izin <b>Contents: Read and write</b> untuk repo ini.</p>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm text-gray-400">Owner</label>
+          <input id="ow" class="input mt-1" placeholder="username / org">
+        </div>
+        <div>
+          <label class="text-sm text-gray-400">Repo</label>
+          <input id="rp" class="input mt-1" placeholder="nama-repo">
+        </div>
+      </div>
+      <div>
+        <label class="text-sm text-gray-400">Branch <span class="text-gray-600">(kosongkan untuk default)</span></label>
+        <input id="br" class="input mt-1" placeholder="main">
+      </div>
+      <button type="submit" class="btn btn-primary w-full justify-center py-3">
+        <i class="fa-solid fa-plug"></i> Hubungkan
+      </button>
+    </form>
+    <p class="text-xs text-gray-600 mt-5">Token hanya disimpan di localStorage browser ini dan langsung dikirim ke api.github.com.</p>
+  </div>
+</section>
+
+<!-- APP -->
+<section id="app" class="hidden min-h-screen">
+  <header class="sticky top-0 z-30 glass border-b border-line">
+    <div class="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-lg bg-blue-600 grid place-items-center text-white"><i class="fa-solid fa-folder-tree"></i></div>
+        <div class="min-w-0">
+          <div id="repoName" class="font-semibold text-white truncate"></div>
+          <div class="text-xs text-blue-400 flex items-center gap-1"><i class="fa-solid fa-code-branch"></i> <span id="branchName"></span></div>
+        </div>
+      </div>
+      <button id="logout" class="btn btn-ghost"><i class="fa-solid fa-right-from-bracket"></i> <span class="hidden sm:inline">Keluar</span></button>
+    </div>
+  </header>
+
+  <main id="main" class="max-w-6xl mx-auto px-5 py-6">
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
+      <nav id="crumbs" class="flex flex-wrap items-center gap-1 text-sm"></nav>
+      <div class="flex flex-wrap gap-2">
+        <button id="btnRefresh" class="btn btn-ghost"><i class="fa-solid fa-rotate"></i> Muat ulang</button>
+        <button id="btnFolder" class="btn btn-ghost"><i class="fa-solid fa-folder-plus"></i> Folder baru</button>
+        <button id="btnUpload" class="btn btn-primary"><i class="fa-solid fa-cloud-arrow-up"></i> Unggah</button>
+        <input id="fileIn" type="file" multiple class="hidden">
+      </div>
+    </div>
+
+    <!-- selection bar -->
+    <div id="selBar" class="hidden fade mb-4 glass rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 border-blue-600/60">
+      <span class="text-sm font-medium text-blue-300"><i class="fa-solid fa-check-double mr-1"></i><span id="selCount"></span></span>
+      <div class="flex flex-wrap gap-2">
+        <button data-sa="dl" class="btn btn-ghost"><i class="fa-solid fa-download"></i> Unduh</button>
+        <button data-sa="zip" class="btn btn-ghost"><i class="fa-solid fa-file-zipper"></i> Kompres</button>
+        <button data-sa="unzip" class="btn btn-ghost"><i class="fa-solid fa-file-export"></i> Ekstrak</button>
+        <button data-sa="del" class="btn btn-danger"><i class="fa-solid fa-trash"></i> Hapus</button>
+        <button data-sa="clear" class="btn btn-ghost"><i class="fa-solid fa-xmark"></i> Batal</button>
+      </div>
+    </div>
+
+    <div class="glass rounded-2xl overflow-hidden shadow-2xl">
+      <div class="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_110px_150px] items-center gap-3 px-4 py-3 border-b border-line text-xs uppercase tracking-wider text-gray-500">
+        <input id="selAll" type="checkbox" class="w-4 h-4 accent-blue-600">
+        <div>Nama</div>
+        <div class="hidden md:block">Ukuran</div>
+        <div class="text-right pr-1">Aksi</div>
+      </div>
+      <div id="list"></div>
+    </div>
+    <div id="count" class="text-xs text-gray-600 mt-3 px-1"></div>
+  </main>
+
+  <div id="drop" class="hidden fixed inset-4 z-40 rounded-3xl pointer-events-none grid place-items-center">
+    <div class="text-center text-blue-300"><i class="fa-solid fa-cloud-arrow-up text-5xl mb-3"></i><p class="font-semibold text-lg">Lepas file untuk diunggah</p></div>
+  </div>
+</section>
+
+<!-- busy & toast -->
+<div id="busy" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-50 glass rounded-full px-5 py-2.5 text-sm flex items-center gap-3 shadow-2xl">
+  <i class="fa-solid fa-circle-notch fa-spin text-blue-500"></i><span id="busyTxt"></span>
+</div>
+<div id="toasts" class="fixed top-5 right-5 z-[60] flex flex-col gap-2 max-w-sm"></div>
+
+<script>
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const LS = 'ghfm_cfg';
+const API = 'https://api.github.com';
+const KEEP = Symbol('keep');
+const te = new TextEncoder(), td = new TextDecoder();
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const enc = p => p.split('/').map(encodeURIComponent).join('/');
+const join = (...p) => p.filter(Boolean).join('/');
+const extOf = n => (n.includes('.') ? n.split('.').pop() : '').toLowerCase();
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+const fmtSize = n => {
+  if (n == null) return '—';
+  const u = ['B', 'KB', 'MB', 'GB']; let i = 0;
+  while (n >= 1024 && i < 3) { n /= 1024; i++; }
+  return n.toFixed(i ? 1 : 0) + ' ' + u[i];
+};
+const IMG = {png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',svg:'image/svg+xml',bmp:'image/bmp',ico:'image/x-icon'};
+const mimeOf = n => IMG[extOf(n)] || 'application/octet-stream';
+const ICON = {png:'fa-file-image',jpg:'fa-file-image',jpeg:'fa-file-image',gif:'fa-file-image',webp:'fa-file-image',svg:'fa-file-image',
+  zip:'fa-file-zipper',rar:'fa-file-zipper','7z':'fa-file-zipper',gz:'fa-file-zipper',pdf:'fa-file-pdf',doc:'fa-file-word',docx:'fa-file-word',
+  xls:'fa-file-excel',xlsx:'fa-file-excel',csv:'fa-file-csv',ppt:'fa-file-powerpoint',pptx:'fa-file-powerpoint',md:'fa-file-lines',txt:'fa-file-lines',
+  js:'fa-file-code',ts:'fa-file-code',jsx:'fa-file-code',tsx:'fa-file-code',html:'fa-file-code',css:'fa-file-code',json:'fa-file-code',py:'fa-file-code',
+  mp3:'fa-file-audio',wav:'fa-file-audio',mp4:'fa-file-video',mov:'fa-file-video'};
+const iconOf = e => e.type === 'dir'
+  ? ['fa-solid fa-folder', 'text-blue-500']
+  : ['fa-solid ' + (ICON[extOf(e.name)] || 'fa-file'), 'text-gray-400'];
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+function bytesToB64(u8) {
+  let s = ''; const C = 0x8000;
+  for (let i = 0; i < u8.length; i += C) s += String.fromCharCode.apply(null, u8.subarray(i, i + C));
+  return btoa(s);
+}
+function b64ToBytes(b) {
+  const s = atob(b.replace(/\s/g, ''));
+  const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
+
+function setBusy(t) { $('#busyTxt').textContent = t; $('#busy').classList.remove('hidden'); }
+function hideBusy() { $('#busy').classList.add('hidden'); }
+function toast(msg, type = 'info') {
+  const d = document.createElement('div');
+  d.className = `px-4 py-3 rounded-xl text-sm shadow-lg border fade ${
+    type === 'err' ? 'bg-red-950 border-red-800 text-red-200'
+    : type === 'ok' ? 'bg-blue-950 border-blue-700 text-blue-100'
+    : 'bg-[#0d0f14] border-line text-gray-200'}`;
+  d.textContent = msg;
+  $('#toasts').appendChild(d);
+  setTimeout(() => d.remove(), 3800);
+}
+
+/* ---------- modal & dialogs ---------- */
+function modal({ title, html = '', wide = false, buttons = [], onMount }) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 fade';
+    wrap.innerHTML = `
+      <div class="glass rounded-2xl w-full ${wide ? 'max-w-4xl' : 'max-w-md'} max-h-[90vh] flex flex-col shadow-2xl">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-line">
+          <h3 class="font-semibold text-white truncate pr-4">${esc(title)}</h3>
+          <button data-x class="btn-ic"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="p-5 overflow-auto flex-1" data-lenis-prevent>${html}</div>
+        <div class="flex justify-end flex-wrap gap-2 px-5 py-4 border-t border-line" data-foot></div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const onKey = ev => { if (ev.key === 'Escape') close(null); };
+    const close = v => { document.removeEventListener('keydown', onKey); wrap.remove(); resolve(v); };
+    document.addEventListener('keydown', onKey);
+    wrap.addEventListener('click', ev => { if (ev.target === wrap) close(null); });
+    wrap.querySelector('[data-x]').onclick = () => close(null);
+    const foot = wrap.querySelector('[data-foot]');
+    if (!buttons.length) foot.remove();
+    buttons.forEach(b => {
+      const el = document.createElement('button');
+      el.className = b.cls || 'btn btn-ghost';
+      el.innerHTML = b.label;
+      el.onclick = async () => {
+        el.disabled = true;
+        try { const v = await b.run(wrap); if (v !== KEEP) close(v); }
+        finally { el.disabled = false; }
+      };
+      foot.appendChild(el);
+    });
+    onMount?.(wrap);
+  });
+}
+const promptDlg = (title, val = '') => modal({
+  title,
+  html: `<input id="dv" class="input" value="${esc(val)}">`,
+  buttons: [
+    { label: 'Batal', run: () => null },
+    { label: 'OK', cls: 'btn btn-primary', run: w => w.querySelector('#dv').value.trim() || KEEP }
+  ],
+  onMount: w => {
+    const i = w.querySelector('#dv'); i.focus(); i.select();
+    i.addEventListener('keydown', ev => { if (ev.key === 'Enter') w.querySelector('.btn-primary').click(); });
+  }
+});
+const confirmDlg = msg => modal({
+  title: 'Konfirmasi',
+  html: `<p class="text-gray-300">${esc(msg)}</p>`,
+  buttons: [
+    { label: 'Batal', run: () => false },
+    { label: 'Ya, lanjut', cls: 'btn btn-danger', run: () => true }
+  ]
+});
+
+/* ---------- GitHub API ---------- */
+let cfg = JSON.parse(localStorage.getItem(LS) || 'null');
+
+async function gh(path, { method = 'GET', body } = {}) {
+  const r = await fetch(API + path, {
+    method,
+    headers: {
+      Authorization: 'Bearer ' + cfg.token,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (r.status === 204) return null;
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.message || 'HTTP ' + r.status); e.status = r.status; throw e; }
+  return data;
+}
+const rp = () => `/repos/${cfg.owner}/${cfg.repo}`;
+
+async function listDir(p) {
+  try {
+    const d = await gh(`${rp()}/contents/${enc(p)}?ref=${encodeURIComponent(cfg.branch)}`);
+    return Array.isArray(d) ? d : [];
+  } catch (e) { if (e.status === 404) return []; throw e; }
+}
+async function getTree() {
+  const t = await gh(`${rp()}/git/trees/${encodeURIComponent(cfg.branch)}?recursive=1`);
+  return t.tree.filter(x => x.type === 'blob');
+}
+async function blobBytes(sha) {
+  const b = await gh(`${rp()}/git/blobs/${sha}`);
+  return b64ToBytes(b.content);
+}
+function putFile(path, u8, msg, sha) {
+  return gh(`${rp()}/contents/${enc(path)}`, {
+    method: 'PUT',
+    body: { message: msg, content: bytesToB64(u8), branch: cfg.branch, ...(sha ? { sha } : {}) }
+  });
+}
+function delFile(path, sha, msg) {
+  return gh(`${rp()}/contents/${enc(path)}`, {
+    method: 'DELETE',
+    body: { message: msg, sha, branch: cfg.branch }
+  });
+}
+
+/* ---------- state ---------- */
+let cwd = '';
+let entries = [];
+let view = [];
+const sel = new Set();
+
+/* collect every file (with sha) under the given items, relative to cwd */
+async function collect(items) {
+  const out = [];
+  const base = cwd ? cwd + '/' : '';
+  let tree = null;
+  for (const e of items) {
+    if (e.type === 'file') { out.push({ path: e.path, sha: e.sha, rel: e.name }); continue; }
+    tree ??= await getTree();
+    const pre = e.path + '/';
+    for (const b of tree) if (b.path.startsWith(pre)) out.push({ path: b.path, sha: b.sha, rel: b.path.slice(base.length) });
+  }
+  return out;
+}
+async function makeZip(items) {
+  const z = new JSZip();
+  const files = await collect(items);
+  let i = 0;
+  for (const f of files) {
+    setBusy(`Mengambil ${++i}/${files.length}…`);
+    z.file(f.rel, await blobBytes(f.sha));
+  }
+  return z.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+}
+
+/* run a mutating task: show errors, always refresh afterward */
+async function task(fn) {
+  try { await fn(); }
+  catch (e) { toast(e.message, 'err'); }
+  finally { hideBusy(); await refresh(); }
+}
+
+/* ---------- actions ---------- */
+async function download(items) {
+  await task(async () => {
+    if (items.length === 1 && items[0].type === 'file') {
+      setBusy('Mengunduh…');
+      saveBlob(new Blob([await blobBytes(items[0].sha)]), items[0].name);
+    } else {
+      setBusy('Mengompres…');
+      const blob = await makeZip(items);
+      saveBlob(blob, (items.length === 1 ? items[0].name : 'download') + '.zip');
+    }
+  });
+}
+
+async function compress(items) {
+  const name = (items.length === 1 ? items[0].name : 'arsip') + '-' + stamp() + '.zip';
+  await task(async () => {
+    const blob = await makeZip(items);
+    setBusy('Mengunggah arsip…');
+    await putFile(join(cwd, name), new Uint8Array(await blob.arrayBuffer()), `Add archive ${name}`);
+    toast(`Arsip dibuat: ${name}`, 'ok');
+  });
+}
+
+async function extract(items) {
+  const zips = items.filter(i => i.type === 'file' && /\.zip$/i.test(i.name));
+  if (!zips.length) return toast('Pilih file .zip untuk diekstrak', 'err');
+  await task(async () => {
+    const tree = await getTree();
+    const map = Object.fromEntries(tree.map(b => [b.path, b.sha]));
+    for (const z of zips) {
+      setBusy(`Membaca ${z.name}…`);
+      const zip = await JSZip.loadAsync(await blobBytes(z.sha));
+      const folder = join(cwd, z.name.replace(/\.zip$/i, ''));
+      const list = Object.values(zip.files).filter(f => !f.dir);
+      let i = 0;
+      for (const f of list) {
+        const target = join(folder, f.name);
+        setBusy(`Mengekstrak ${++i}/${list.length}: ${f.name}`);
+        await putFile(target, await f.async('uint8array'), `Extract ${f.name}`, map[target]);
+      }
+    }
+    toast('Ekstrak selesai', 'ok');
+  });
+}
+
+async function deleteItems(items) {
+  if (!await confirmDlg(`Hapus ${items.length} item? Setiap file akan dihapus lewat commit baru.`)) return;
+  await task(async () => {
+    const files = await collect(items);
+    let i = 0;
+    for (const f of files) {
+      setBusy(`Menghapus ${++i}/${files.length}…`);
+      await delFile(f.path, f.sha, `Delete ${f.path}`);
+    }
+    toast('Berhasil dihapus', 'ok');
+  });
+}
+
+async function rename(e) {
+  const name = await promptDlg('Ubah nama', e.name);
+  if (!name || name === e.name) return;
+  const newPath = join(cwd, name);
+  await task(async () => {
+    if (e.type === 'file') {
+      setBusy('Memindahkan…');
+      await putFile(newPath, await blobBytes(e.sha), `Rename ${e.name} -> ${name}`);
+      await delFile(e.path, e.sha, `Rename ${e.name} -> ${name}`);
+    } else {
+      const tree = await getTree();
+      const pre = e.path + '/';
+      const files = tree.filter(b => b.path.startsWith(pre));
+      let i = 0;
+      for (const b of files) {
+        setBusy(`Memindahkan ${++i}/${files.length}…`);
+        const np = newPath + '/' + b.path.slice(pre.length);
+        await putFile(np, await blobBytes(b.sha), `Rename ${b.path}`);
+        await delFile(b.path, b.sha, `Rename ${b.path}`);
+      }
+    }
+    toast('Berhasil diubah namanya', 'ok');
+  });
+}
+
+async function newFolder() {
+  const name = await promptDlg('Nama folder baru');
+  if (!name) return;
+  await task(async () => {
+    setBusy('Membuat folder…');
+    await putFile(join(cwd, name, '.gitkeep'), new Uint8Array(0), `Create folder ${name}`);
+    toast('Folder dibuat', 'ok');
+  });
+}
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+  await task(async () => {
+    let i = 0;
+    for (const f of files) {
+      setBusy(`Mengunggah ${++i}/${files.length}: ${f.name}`);
+      const p = join(cwd, f.name);
+      const existing = entries.find(x => x.path === p && x.type === 'file');
+      await putFile(p, new Uint8Array(await f.arrayBuffer()), `Upload ${f.name}`, existing?.sha);
+    }
+    toast(`${files.length} file diunggah`, 'ok');
+  });
+}
+
+async function saveText(text, e) {
+  const bytes = te.encode(text);
+  try {
+    setBusy('Menyimpan…');
+    const r = await putFile(e.path, bytes, `Update ${e.name}`, e.sha);
+    e.sha = r.content.sha; e.size = bytes.length;
+    toast('Tersimpan', 'ok');
+    return true;
+  } catch (err) {
+    toast(err.message, 'err');
+    return KEEP;
+  } finally { hideBusy(); }
+}
+
+async function openEditor(e, bytes) {
+  const text = td.decode(bytes);
+  const closed = await modal({
+    title: e.name,
+    wide: true,
+    html: `<textarea id="ed" spellcheck="false" class="input font-mono text-sm h-[60vh] resize-none"></textarea>
+           <p class="text-xs text-gray-500 mt-2">Tekan Ctrl/⌘ + S untuk menyimpan.</p>`,
+    buttons: [
+      { label: 'Tutup', run: () => null },
+      { label: '<i class="fa-solid fa-floppy-disk"></i> Simpan', cls: 'btn btn-primary', run: w => saveText(w.querySelector('#ed').value, e) }
+    ],
+    onMount: w => {
+      const ta = w.querySelector('#ed');
+      ta.value = text;
+      w.addEventListener('keydown', ev => {
+        if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
+          ev.preventDefault(); w.querySelector('.btn-primary').click();
+        }
+      });
+    }
+  });
+  if (closed) refresh();
+}
+
+async function openPreview(e) {
+  let url;
+  try {
+    setBusy('Memuat gambar…');
+    url = URL.createObjectURL(new Blob([await blobBytes(e.sha)], { type: mimeOf(e.name) }));
+  } catch (err) { return toast(err.message, 'err'); }
+  finally { hideBusy(); }
+  await modal({
+    title: e.name,
+    wide: true,
+    html: `<div class="flex justify-center"><img src="${url}" class="max-h-[70vh] rounded-lg" alt=""></div>`,
+    buttons: [
+      { label: 'Tutup', run: () => null },
+      { label: '<i class="fa-solid fa-download"></i> Unduh', cls: 'btn btn-primary', run: () => { download([e]); return KEEP; } }
+    ]
+  });
+  URL.revokeObjectURL(url);
+}
+
+async function openFile(e) {
+  if (IMG[extOf(e.name)]) return openPreview(e);
+  let bytes;
+  try {
+    setBusy('Membuka…');
+    bytes = await blobBytes(e.sha);
+  } catch (err) { return toast(err.message, 'err'); }
+  finally { hideBusy(); }
+  const isBinary = bytes.subarray(0, 8000).includes(0);
+  if (isBinary || bytes.length > 1_000_000) {
+    saveBlob(new Blob([bytes]), e.name);
+    return;
+  }
+  openEditor(e, bytes);
+}
+
+/* ---------- rendering ---------- */
+function rowHtml(e, i) {
+  const [ic, col] = iconOf(e);
+  const on = sel.has(e.path);
+  return `
+    <div class="row grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_110px_150px] items-center gap-3 px-4 py-2.5 border-b border-line ${on ? 'sel' : ''}" data-i="${i}">
+      <input type="checkbox" class="chk w-4 h-4 accent-blue-600" data-i="${i}" ${on ? 'checked' : ''}>
+      <div class="name flex items-center gap-3 min-w-0 cursor-pointer select-none">
+        <i class="${ic} ${col} text-lg w-5 text-center"></i>
+        <span class="truncate text-gray-100 hover:text-blue-400 transition">${esc(e.name)}</span>
+      </div>
+      <div class="hidden md:block text-sm text-gray-500">${e.type === 'dir' ? '—' : fmtSize(e.size)}</div>
+      <div class="flex justify-end gap-1">
+        <button class="btn-ic" data-act="dl" data-i="${i}" title="Unduh"><i class="fa-solid fa-download"></i></button>
+        <button class="btn-ic" data-act="ren" data-i="${i}" title="Ubah nama"><i class="fa-solid fa-pen"></i></button>
+        <button class="btn-ic hover:text-red-400" data-act="del" data-i="${i}" title="Hapus"><i class="fa-solid fa-trash"></i></button>
+      </div>
+    </div>`;
+}
+
+function render() {
+  const parts = cwd ? cwd.split('/') : [];
+  $('#crumbs').innerHTML =
+    `<button class="crumb" data-c="-1"><i class="fa-solid fa-house"></i> ${esc(cfg.repo)}</button>` +
+    parts.map((p, i) => `<span class="text-gray-700">/</span><button class="crumb" data-c="${i}">${esc(p)}</button>`).join('');
+
+  view = [...entries].sort((a, b) =>
+    (a.type === 'dir' ? 0 : 1) - (b.type === 'dir' ? 0 : 1) || a.name.localeCompare(b.name));
+
+  $('#list').innerHTML = view.length
+    ? view.map(rowHtml).join('')
+    : `<div class="py-16 text-center text-gray-500"><i class="fa-regular fa-folder-open text-4xl mb-3"></i><p>Folder kosong. Unggah file atau buat folder baru.</p></div>`;
+  $('#count').textContent = `${view.length} item`;
+  $('#selBar').classList.toggle('hidden', sel.size === 0);
+  $('#selCount').textContent = `${sel.size} dipilih`;
+  $('#selAll').checked = view.length > 0 && sel.size === view.length;
+}
+
+async function refresh() {
+  setBusy('Memuat…');
+  try { entries = await listDir(cwd); sel.clear(); }
+  catch (err) { entries = []; toast('Gagal memuat: ' + err.message, 'err'); }
+  finally { hideBusy(); }
+  render();
+}
+
+function toggle(path, on) {
+  on ? sel.add(path) : sel.delete(path);
+  render();
+}
+
+/* ---------- events ---------- */
+$('#list').addEventListener('click', e => {
+  const row = e.target.closest('[data-i]');
+  if (!row) return;
+  const item = view[+row.dataset.i];
+  const btn = e.target.closest('[data-act]');
+  if (btn) {
+    const act = btn.dataset.act;
+    if (act === 'dl') download([item]);
+    if (act === 'ren') rename(item);
+    if (act === 'del') deleteItems([item]);
+    return;
+  }
+  if (e.target.classList.contains('chk')) return toggle(item.path, e.target.checked);
+  if (e.target.closest('.name')) {
+    if (item.type === 'dir') { cwd = item.path; refresh(); }
+    else openFile(item);
+    return;
+  }
+  toggle(item.path, !sel.has(item.path));
+});
+
+$('#crumbs').addEventListener('click', e => {
+  const b = e.target.closest('[data-c]');
+  if (!b) return;
+  const c = +b.dataset.c;
+  cwd = c < 0 ? '' : cwd.split('/').slice(0, c + 1).join('/');
+  refresh();
+});
+
+$('#selAll').addEventListener('change', e => {
+  sel.clear();
+  if (e.target.checked) view.forEach(x => sel.add(x.path));
+  render();
+});
+
+$('#selBar').addEventListener('click', e => {
+  const a = e.target.closest('[data-sa]');
+  if (!a) return;
+  const items = view.filter(x => sel.has(x.path));
+  switch (a.dataset.sa) {
+    case 'dl': download(items); break;
+    case 'zip': compress(items); break;
+    case 'unzip': extract(items); break;
+    case 'del': deleteItems(items); break;
+    case 'clear': sel.clear(); render(); break;
+  }
+});
+
+$('#btnRefresh').onclick = refresh;
+$('#btnFolder').onclick = newFolder;
+$('#btnUpload').onclick = () => $('#fileIn').click();
+$('#fileIn').onchange = e => { uploadFiles([...e.target.files]); e.target.value = ''; };
+
+/* drag & drop upload */
+document.addEventListener('dragover', e => {
+  if (e.dataTransfer?.types.includes('Files') && cfg) {
+    e.preventDefault(); $('#drop').classList.remove('hidden');
+  }
+});
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) $('#drop').classList.add('hidden'); });
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  $('#drop').classList.add('hidden');
+  if (cfg && e.dataTransfer.files.length) uploadFiles([...e.dataTransfer.files]);
+});
+
+/* login / logout */
+function showApp() {
+  $('#login').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  $('#repoName').textContent = `${cfg.owner}/${cfg.repo}`;
+  $('#branchName').textContent = cfg.branch;
+}
+function showLogin() {
+  $('#app').classList.add('hidden');
+  $('#login').classList.remove('hidden');
+  if (cfg) { $('#tk').value = cfg.token; $('#ow').value = cfg.owner; $('#rp').value = cfg.repo; $('#br').value = cfg.branch; }
+}
+$('#loginForm').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const next = {
+    token: $('#tk').value.trim(),
+    owner: $('#ow').value.trim(),
+    repo: $('#rp').value.trim(),
+    branch: $('#br').value.trim()
+  };
+  if (!next.token || !next.owner || !next.repo) return toast('Lengkapi token, owner, dan repo', 'err');
+  cfg = next;
+  setBusy('Menghubungkan…');
+  try {
+    const r = await gh(`/repos/${next.owner}/${next.repo}`);
+    cfg.branch = next.branch || r.default_branch;
+    if (r.permissions && !r.permissions.push) toast('Token ini hanya read-only untuk repo tersebut', 'err');
+    if (!r.private) toast('Repo ini publik. Pastikan memang ingin dikelola di sini.', 'info');
+    localStorage.setItem(LS, JSON.stringify(cfg));
+    showApp();
+    await refresh();
+  } catch (err) {
+    cfg = null;
+    toast('Gagal terhubung: ' + err.message, 'err');
+  } finally { hideBusy(); }
+});
+$('#logout').onclick = () => { localStorage.removeItem(LS); location.reload(); };
+
+/* ---------- Lenis smooth scroll ---------- */
+const lenis = new Lenis({ duration: 1.1, smoothWheel: true });
+function raf(t) { lenis.raf(t); requestAnimationFrame(raf); }
+requestAnimationFrame(raf);
+
+/* ---------- boot ---------- */
+if (cfg?.token) { showApp(); refresh(); }
+else showLogin();
+</script>
+</body>
+</html>
