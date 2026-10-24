@@ -143,13 +143,15 @@
         <button data-sa="dl" class="btn btn-ghost"><i class="fa-solid fa-download"></i> Unduh</button>
         <button data-sa="zip" class="btn btn-ghost"><i class="fa-solid fa-file-zipper"></i> Kompres</button>
         <button data-sa="unzip" class="btn btn-ghost"><i class="fa-solid fa-file-export"></i> Ekstrak</button>
+        <button data-sa="cp" class="btn btn-ghost"><i class="fa-solid fa-copy"></i> Salin</button>
+        <button data-sa="mv" class="btn btn-ghost"><i class="fa-solid fa-arrows-up-down-left-right"></i> Pindah</button>
         <button data-sa="del" class="btn btn-danger"><i class="fa-solid fa-trash"></i> Hapus</button>
         <button data-sa="clear" class="btn btn-ghost"><i class="fa-solid fa-xmark"></i> Batal</button>
       </div>
     </div>
 
     <div class="glass rounded-2xl overflow-hidden shadow-2xl">
-      <div class="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_110px_150px] items-center gap-3 px-4 py-3 border-b border-line text-xs uppercase tracking-wider text-gray-500">
+      <div class="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_110px_190px] items-center gap-3 px-4 py-3 border-b border-line text-xs uppercase tracking-wider text-gray-500">
         <input id="selAll" type="checkbox" class="w-4 h-4 accent-blue-600">
         <div>Nama</div>
         <div class="hidden md:block">Ukuran</div>
@@ -555,12 +557,95 @@ async function openFile(e) {
   openEditor(e, bytes);
 }
 
+/* ---------- copy & move ---------- */
+const addCopySuffix = n => {
+  const i = n.lastIndexOf('.');
+  return i > 0 ? `${n.slice(0, i)} (copy)${n.slice(i)}` : `${n} (copy)`;
+};
+
+function pickDestination(tree, items, mode) {
+  const dirs = new Set(['']);
+  for (const b of tree) {
+    const p = b.path.split('/');
+    for (let i = 1; i < p.length; i++) dirs.add(p.slice(0, i).join('/'));
+  }
+  // saat memindah folder, folder itu sendiri dan isinya tidak boleh jadi tujuan
+  const blocked = mode === 'move' ? items.filter(x => x.type === 'dir').map(x => x.path) : [];
+  const list = [...dirs].sort().filter(d => !blocked.some(b => d === b || d.startsWith(b + '/')));
+  const html = `<div class="space-y-1">${list.map(d => {
+    const depth = d ? d.split('/').length : 0;
+    const name = d ? d.split('/').pop() : cfg.repo;
+    return `<label class="flex items-center gap-3 py-2 pr-3 rounded-lg hover:bg-blue-600/10 cursor-pointer" style="padding-left:${12 + depth * 18}px">
+      <input type="radio" name="dst" value="${esc(d)}" ${d === cwd ? 'checked' : ''} class="accent-blue-600">
+      <i class="fa-solid fa-folder text-blue-500"></i><span class="truncate">${esc(name)}</span>
+      ${d === cwd ? '<span class="text-xs text-gray-500 ml-auto">saat ini</span>' : ''}
+    </label>`;
+  }).join('')}</div>`;
+  return modal({
+    title: mode === 'move' ? 'Pindahkan ke…' : 'Salin ke…',
+    html,
+    buttons: [
+      { label: 'Batal', run: () => null },
+      { label: mode === 'move' ? 'Pindahkan' : 'Salin', cls: 'btn btn-primary',
+        run: w => ({ dir: w.querySelector('input[name=dst]:checked').value }) }
+    ]
+  });
+}
+
+async function transfer(items, mode) {
+  if (!items.length) return;
+  const isMove = mode === 'move';
+  let tree;
+  try { setBusy('Memuat struktur repo…'); tree = await getTree(); }
+  catch (err) { return toast(err.message, 'err'); }
+  finally { hideBusy(); }
+
+  const picked = await pickDestination(tree, items, mode);
+  if (!picked) return;
+  const dest = picked.dir;
+  const sameFolder = dest === cwd;
+
+  if (isMove && sameFolder) return toast('Item sudah berada di folder ini', 'info');
+  if (!isMove && sameFolder) toast('Lokasi tujuan sama dengan asal, jadi salinan diberi nama "(copy)"', 'info');
+
+  const existing = new Map(tree.map(b => [b.path, b.sha]));
+  const plan = [];
+  for (const it of items) {
+    const topName = (!isMove && sameFolder) ? addCopySuffix(it.name) : it.name;
+    const newTop = join(dest, topName);
+    if (it.type === 'file') {
+      plan.push({ src: it.path, sha: it.sha, dst: newTop });
+    } else {
+      if (isMove && (dest === it.path || dest.startsWith(it.path + '/')))
+        return toast(`Folder "${it.name}" tidak bisa dipindah ke dalam dirinya sendiri`, 'err');
+      const pre = it.path + '/';
+      for (const b of tree) {
+        if (b.path.startsWith(pre)) plan.push({ src: b.path, sha: b.sha, dst: newTop + '/' + b.path.slice(pre.length) });
+      }
+    }
+  }
+  if (!plan.length) return toast('Tidak ada file untuk diproses (folder kosong)', 'info');
+
+  const clashes = plan.filter(p => existing.has(p.dst) && p.dst !== p.src);
+  if (clashes.length && !await confirmDlg(`${clashes.length} file di tujuan sudah ada dan akan ditimpa. Lanjutkan?`)) return;
+
+  await task(async () => {
+    let i = 0;
+    for (const p of plan) {
+      setBusy(`${isMove ? 'Memindahkan' : 'Menyalin'} ${++i}/${plan.length}…`);
+      await putFile(p.dst, await blobBytes(p.sha), `${isMove ? 'Move' : 'Copy'} ${p.src} -> ${p.dst}`, existing.get(p.dst));
+      if (isMove) await delFile(p.src, p.sha, `Move ${p.src} -> ${p.dst}`);
+    }
+    toast(`${plan.length} file ${isMove ? 'dipindah' : 'disalin'}`, 'ok');
+  });
+}
+
 /* ---------- rendering ---------- */
 function rowHtml(e, i) {
   const [ic, col] = iconOf(e);
   const on = sel.has(e.path);
   return `
-    <div class="row grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_110px_150px] items-center gap-3 px-4 py-2.5 border-b border-line ${on ? 'sel' : ''}" data-i="${i}">
+    <div class="row grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_1fr_110px_190px] items-center gap-3 px-4 py-2.5 border-b border-line ${on ? 'sel' : ''}" data-i="${i}">
       <input type="checkbox" class="chk w-4 h-4 accent-blue-600" data-i="${i}" ${on ? 'checked' : ''}>
       <div class="name flex items-center gap-3 min-w-0 cursor-pointer select-none">
         <i class="${ic} ${col} text-lg w-5 text-center"></i>
@@ -569,6 +654,8 @@ function rowHtml(e, i) {
       <div class="hidden md:block text-sm text-gray-500">${e.type === 'dir' ? '—' : fmtSize(e.size)}</div>
       <div class="flex justify-end gap-1">
         <button class="btn-ic" data-act="dl" data-i="${i}" title="Unduh"><i class="fa-solid fa-download"></i></button>
+        <button class="btn-ic" data-act="cp" data-i="${i}" title="Salin"><i class="fa-solid fa-copy"></i></button>
+        <button class="btn-ic" data-act="mv" data-i="${i}" title="Pindah"><i class="fa-solid fa-arrows-up-down-left-right"></i></button>
         <button class="btn-ic" data-act="ren" data-i="${i}" title="Ubah nama"><i class="fa-solid fa-pen"></i></button>
         <button class="btn-ic hover:text-red-400" data-act="del" data-i="${i}" title="Hapus"><i class="fa-solid fa-trash"></i></button>
       </div>
@@ -617,6 +704,8 @@ $('#list').addEventListener('click', e => {
     if (act === 'dl') download([item]);
     if (act === 'ren') rename(item);
     if (act === 'del') deleteItems([item]);
+    if (act === 'cp') transfer([item], 'copy');
+    if (act === 'mv') transfer([item], 'move');
     return;
   }
   if (e.target.classList.contains('chk')) return toggle(item.path, e.target.checked);
@@ -650,6 +739,8 @@ $('#selBar').addEventListener('click', e => {
     case 'dl': download(items); break;
     case 'zip': compress(items); break;
     case 'unzip': extract(items); break;
+    case 'cp': transfer(items, 'copy'); break;
+    case 'mv': transfer(items, 'move'); break;
     case 'del': deleteItems(items); break;
     case 'clear': sel.clear(); render(); break;
   }
