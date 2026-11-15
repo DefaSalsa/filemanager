@@ -132,7 +132,9 @@
         <button id="btnRefresh" class="btn btn-ghost"><i class="fa-solid fa-rotate"></i> Muat ulang</button>
         <button id="btnFolder" class="btn btn-ghost"><i class="fa-solid fa-folder-plus"></i> Folder baru</button>
         <button id="btnUpload" class="btn btn-primary"><i class="fa-solid fa-cloud-arrow-up"></i> Unggah</button>
+        <button id="btnZip" class="btn btn-primary"><i class="fa-solid fa-file-zipper"></i> Unggah &amp; Ekstrak</button>
         <input id="fileIn" type="file" multiple class="hidden">
+        <input id="zipIn" type="file" accept=".zip" multiple class="hidden">
       </div>
     </div>
 
@@ -400,6 +402,19 @@ async function compress(items) {
   });
 }
 
+/* isi zip langsung ke folder saat ini (tanpa membuat folder baru) */
+async function extractInto(zipBytes, map) {
+  const zip = await JSZip.loadAsync(zipBytes);
+  const list = Object.values(zip.files).filter(f => !f.dir);
+  let i = 0;
+  for (const f of list) {
+    const target = join(cwd, f.name);
+    setBusy(`Mengekstrak ${++i}/${list.length}: ${f.name}`);
+    await putFile(target, await f.async('uint8array'), `Extract ${f.name}`, map[target]);
+  }
+  return list.length;
+}
+
 async function extract(items) {
   const zips = items.filter(i => i.type === 'file' && /\.zip$/i.test(i.name));
   if (!zips.length) return toast('Pilih file .zip untuk diekstrak', 'err');
@@ -408,17 +423,24 @@ async function extract(items) {
     const map = Object.fromEntries(tree.map(b => [b.path, b.sha]));
     for (const z of zips) {
       setBusy(`Membaca ${z.name}…`);
-      const zip = await JSZip.loadAsync(await blobBytes(z.sha));
-      const folder = join(cwd, z.name.replace(/\.zip$/i, ''));
-      const list = Object.values(zip.files).filter(f => !f.dir);
-      let i = 0;
-      for (const f of list) {
-        const target = join(folder, f.name);
-        setBusy(`Mengekstrak ${++i}/${list.length}: ${f.name}`);
-        await putFile(target, await f.async('uint8array'), `Extract ${f.name}`, map[target]);
-      }
+      await extractInto(await blobBytes(z.sha), map);
     }
     toast('Ekstrak selesai', 'ok');
+  });
+}
+
+async function uploadAndExtract(files) {
+  const zips = files.filter(f => /\.zip$/i.test(f.name));
+  if (!zips.length) return toast('Pilih file .zip', 'err');
+  if (zips.length < files.length) toast('Hanya file .zip yang diekstrak, file lain diabaikan', 'info');
+  await task(async () => {
+    const tree = await getTree();
+    const map = Object.fromEntries(tree.map(b => [b.path, b.sha]));
+    for (const z of zips) {
+      setBusy(`Membaca ${z.name}…`);
+      await extractInto(new Uint8Array(await z.arrayBuffer()), map);
+    }
+    toast(`${zips.length} zip diekstrak ke folder ini`, 'ok');
   });
 }
 
@@ -750,6 +772,8 @@ $('#btnRefresh').onclick = refresh;
 $('#btnFolder').onclick = newFolder;
 $('#btnUpload').onclick = () => $('#fileIn').click();
 $('#fileIn').onchange = e => { uploadFiles([...e.target.files]); e.target.value = ''; };
+$('#btnZip').onclick = () => $('#zipIn').click();
+$('#zipIn').onchange = e => { uploadAndExtract([...e.target.files]); e.target.value = ''; };
 
 /* drag & drop upload */
 document.addEventListener('dragover', e => {
